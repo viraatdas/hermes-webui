@@ -85,6 +85,22 @@ def _resolve_custom_provider_runtime_overrides(
     return resolved_provider, resolved_api_key, resolved_base_url
 
 
+def _is_fallback_lifecycle_message(kind: str, message: str) -> bool:
+    """Return True if an agent lifecycle status should surface as a fallback warning."""
+    k = str(kind or '').strip().lower()
+    m = str(message or '').strip().lower()
+    return (
+        k == 'lifecycle'
+        and (
+            'rate limited' in m
+            or 'switching to fallback' in m
+            or 'falling back' in m
+            or 'fallback activated' in m
+            or 'trying fallback' in m
+        )
+    )
+
+
 def _prewarm_skill_tool_modules():
     """Import tools.skills_tool and tools.skill_manager_tool outside any lock.
 
@@ -3066,7 +3082,12 @@ def _run_agent_streaming(
             logger.debug("Failed to put event to queue")
 
     def _agent_status_callback(kind, message):
-        """Bridge Agent lifecycle compression status into WebUI SSE."""
+        """Bridge Agent lifecycle status into WebUI SSE.
+
+        Passes compression events as 'compressing' events and rate-limit/fallback
+        events as 'warning' events so the frontend can surface them to the user.
+        All other lifecycle messages are dropped silently.
+        """
         _message = str(message or '').strip()
         _kind = str(kind or '').strip().lower()
         if not _message:
@@ -3081,12 +3102,17 @@ def _run_agent_streaming(
                 or 'context too large' in _lower
             )
         )
-        if not _is_compression_start:
+        if _is_compression_start:
+            put('compressing', {
+                'session_id': session_id,
+                'message': 'Auto-compressing context to continue...',
+            })
             return
-        put('compressing', {
-            'session_id': session_id,
-            'message': 'Auto-compressing context to continue...',
-        })
+        # Pass through rate-limit and fallback messages so the frontend can
+        # show them as warnings via the existing messages.js 'warning' listener.
+        _is_fallback_notice = _is_fallback_lifecycle_message(_kind, _message)
+        if _is_fallback_notice:
+            put('warning', {'type': 'fallback', 'message': _message})
 
     # Initialised here (before any code that may raise) so the outer `finally`
     # block can safely check `if _checkpoint_stop is not None` even when an
