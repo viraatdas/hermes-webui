@@ -159,11 +159,11 @@ class TestAuxiliaryModelsI18n:
             )
 
     def test_all_locales_have_auxiliary_keys(self):
-        """Count of each key should equal the number of locales (11)."""
+        """Count of each key should equal the number of locales (12 with Turkish)."""
         for key in self.REQUIRED_KEYS:
             count = I18N_JS.count(f"{key}:")
-            assert count == 11, (
-                f"i18n key '{key}' found {count} times — expected 11 (one per locale)"
+            assert count == 12, (
+                f"i18n key '{key}' found {count} times — expected 12 (one per locale)"
             )
 
 
