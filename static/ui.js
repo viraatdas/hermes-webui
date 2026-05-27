@@ -497,7 +497,31 @@ if(document.readyState==='complete'){
 }
 
 /* ── Image lightbox — click any .msg-media-img to enlarge ─────────────────── */
-function _openImgLightbox(src, alt) {
+function _openImgLightbox(imgEl) {
+  if(!imgEl || !imgEl.src) return;
+  const src=imgEl.src, alt=imgEl.alt||'';
+  // Find sibling images in the same message for prev/next navigation.
+  // Walk up from the clicked image to find the message container, then
+  // collect all .msg-media-img within it.
+  // Composer attach-tray chips bypass sibling detection — each chip click
+  // opens a single-image lightbox (no navigation between staged uploads).
+  let allImages = [];
+  let startIndex = 0;
+  if(!imgEl.closest('.attach-tray')){
+    let container = imgEl.closest('.msg-row, .assistant-turn-blocks, .assistant-turn, .user-turn');
+    if(!container) container = imgEl.parentElement;
+    if(container){
+      const siblings = container.querySelectorAll('.msg-media-img');
+      if(siblings.length>1){
+        allImages = Array.from(siblings);
+        startIndex = allImages.indexOf(imgEl);
+        if(startIndex===-1) startIndex=0;
+      }
+    }
+  }
+  _openImgLightboxWithNav(src, alt, allImages, startIndex);
+}
+function _openImgLightboxWithNav(src, alt, images, index) {
   const lb = document.createElement('div');
   lb.className = 'img-lightbox';
   lb.setAttribute('role', 'dialog');
@@ -513,15 +537,58 @@ function _openImgLightbox(src, alt) {
   cls.onclick = () => _closeImgLightbox(lb);
   lb.appendChild(img);
   lb.appendChild(cls);
+  // Prev/Next navigation — store index and images on lb so a single set of
+  // handlers reads live values without closure churn on every nav.
+  lb._navIndex = index;
+  lb._navImages = (images && images.length>1) ? images : null;
+  if(lb._navImages){
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'img-lightbox-nav img-lightbox-nav-prev';
+    prevBtn.setAttribute('aria-label', 'Previous image');
+    prevBtn.innerHTML = '‹';
+    prevBtn.onclick = e => { e.stopPropagation(); _navigateLightbox(lb, -1); };
+    lb.appendChild(prevBtn);
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'img-lightbox-nav img-lightbox-nav-next';
+    nextBtn.setAttribute('aria-label', 'Next image');
+    nextBtn.innerHTML = '›';
+    nextBtn.onclick = e => { e.stopPropagation(); _navigateLightbox(lb, 1); };
+    lb.appendChild(nextBtn);
+    lb._counterEl = document.createElement('div');
+    lb._counterEl.className = 'img-lightbox-counter';
+    lb.appendChild(lb._counterEl);
+    lb._counterEl.textContent = (index+1) + ' / ' + images.length;
+  }
   lb.onclick = () => _closeImgLightbox(lb);
   document.body.appendChild(lb);
-  // Close on Escape
-  lb._escHandler = e => { if(e.key==='Escape') _closeImgLightbox(lb); };
-  document.addEventListener('keydown', lb._escHandler);
+  // Single keyboard handler — reads lb._navX live, no remove/add churn.
+  lb._keyHandler = e => {
+    if(e.key==='Escape'){ _closeImgLightbox(lb); return; }
+    if(lb._navImages){
+      if(e.key==='ArrowLeft'){ e.preventDefault(); _navigateLightbox(lb, -1); }
+      if(e.key==='ArrowRight'){ e.preventDefault(); _navigateLightbox(lb, 1); }
+    }
+  };
+  document.addEventListener('keydown', lb._keyHandler);
+}
+function _navigateLightbox(lb, direction) {
+  const images = lb._navImages;
+  if(!images) return;
+  const newIndex = lb._navIndex + direction;
+  if(newIndex<0 || newIndex>=images.length) return;
+  lb._navIndex = newIndex;
+  const nextImg = images[newIndex];
+  const lbImg = lb.querySelector('img');
+  if(!lbImg) return;
+  lbImg.src = nextImg.src;
+  lbImg.alt = nextImg.alt || '';
+  lb.setAttribute('aria-label', nextImg.alt || 'Image');
+  // Update counter via stored reference — no DOM query.
+  if(lb._counterEl) lb._counterEl.textContent = (newIndex+1) + ' / ' + images.length;
 }
 function _closeImgLightbox(lb) {
   if(!lb || !lb.parentNode) return;
-  document.removeEventListener('keydown', lb._escHandler);
+  document.removeEventListener('keydown', lb._keyHandler);
   lb.style.animation = 'lb-in .12s ease reverse';
   setTimeout(() => lb.parentNode && lb.parentNode.removeChild(lb), 120);
 }
@@ -530,14 +597,14 @@ document.addEventListener('click', e => {
   if(!e.target || !e.target.closest) return;
   // Message-attached images (already wired since v0.50.x).
   let img = e.target.closest('.msg-media-img');
-  if(img){ _openImgLightbox(img.src, img.alt); return; }
+  if(img){ _openImgLightbox(img); return; }
   // Composer attach-tray image thumbnails — click any pasted/dropped image
   // chip to lightbox-zoom it before sending. Excludes audio/video chips,
   // which keep their inline media controls. SVG thumbnails (.attach-thumb--svg)
   // are still images visually, so they qualify.
   img = e.target.closest('.attach-thumb');
   if(img && img.tagName === 'IMG'){
-    _openImgLightbox(img.src, img.alt || img.title || 'Attached image');
+    _openImgLightbox(img);
     return;
   }
 });
