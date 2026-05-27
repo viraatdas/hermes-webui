@@ -3,6 +3,8 @@
 
 ## [Unreleased]
 
+## [v0.51.142] — 2026-05-26 — Release DN (stage-batch24 — 4-PR fresh-today batch)
+
 ### Added
 
 - New `GET /api/crons/delivery-options` endpoint surfaces the agent's full delivery-platform registry. The cron-create UI now reads delivery options dynamically (including telegram, discord, slack, feishu, wecom, signal, etc.) instead of a 4-option hardcoded select, and the deliver field is editable for existing jobs. (#2996)
