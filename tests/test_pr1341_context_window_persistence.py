@@ -38,12 +38,15 @@ def test_streaming_persists_context_fields_on_session_before_save():
     # Save call follows shortly after
     save_call = src.find("\n                s.save()", block_start)
     assert save_call != -1, "s.save() not found after the post-merge marker"
-    # Limit bumped to 9000 by cancellation finalization guards: the block now also
-    # checks for a late user cancel immediately before the durable final save,
-    # preventing a race that would otherwise save/emit a completed turn after Stop.
-    # The context_length fallback is still a single focused resolver call with
-    # arg-prep scaffold and commentary explaining the failure mode it prevents.
-    assert save_call - block_start < 9000, (
+    # Limit bumped to 13000 by the #3256/#3263 default-only context_length guard:
+    # the pre-save block now also skips the agent compressor's stale global
+    # context_length cap for non-default models (e.g. a 1M-context variant when
+    # model.default carries a 232K cap) so it doesn't clobber the real per-model
+    # window on disk. Earlier the limit was 9000 (cancellation finalization
+    # guards). The context_length fallback is still a single focused resolver
+    # call with arg-prep scaffold and commentary explaining the failure mode it
+    # prevents.
+    assert save_call - block_start < 13000, (
         "s.save() should be close to the post-merge marker — block expanded unexpectedly. "
         "If you've added a new pre-save mutation block here, bump this limit."
     )
