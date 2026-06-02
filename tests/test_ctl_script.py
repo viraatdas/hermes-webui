@@ -149,6 +149,15 @@ def test_start_uses_nohup_so_daemon_survives_launcher_exit():
     assert 'exec nohup "${python_exe}"' in ctl_text
 
 
+def test_process_detection_handles_missing_ps_and_logical_repo_paths():
+    ctl_text = CTL.read_text(encoding="utf-8")
+
+    assert 'REPO_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' in ctl_text
+    assert '$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)' in ctl_text
+    assert "command -v ps >/dev/null 2>&1" in ctl_text
+    assert '"/proc/${pid}/cmdline"' in ctl_text
+
+
 def test_start_can_ignore_repo_dotenv_for_authoritative_test_env(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

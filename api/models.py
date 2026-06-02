@@ -2804,6 +2804,17 @@ def all_sessions(diag=None):
                     if full:
                         index[i] = full.compact()
                         backfilled.append(full)
+            indexed_ids = {
+                str(s.get('session_id') or '')
+                for s in index
+                if s.get('session_id')
+            }
+            for missing_id in sorted(persisted_ids - indexed_ids):
+                _diag_stage(diag, "all_sessions.backfill_load")
+                full = Session.load_metadata_only(missing_id)
+                if full:
+                    index.append(full.compact())
+                    backfilled.append(full)
             if backfilled:
                 try:
                     _diag_stage(diag, "all_sessions.backfill_write")

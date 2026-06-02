@@ -2,6 +2,7 @@
 # Hermes Web UI -- Changelog
 
 ## [Unreleased]
+- Fixed same-session external refresh so long transcripts keep their loaded width and scroll position instead of collapsing back to the default tail window (#3239).
 
 ## [v0.51.213] — 2026-06-02 — Release GG (stage-p2b — keep gateway context visible in chat transcripts)
 

@@ -1,5 +1,6 @@
 """Regression tests for /api/sessions lineage metadata used by sidebar collapse."""
 
+import json
 import sqlite3
 import time
 
@@ -174,9 +175,13 @@ def test_child_of_hidden_compression_segment_exposes_parent_lineage_root(_isolat
     conn = _ensure_state_db(_isolate)
     t0 = time.time() - 100
     try:
-        _save_webui_session("lineage_api_root", title="Visible root", updated_at=t0)
-        _save_webui_session("lineage_api_tip", title="Visible tip", updated_at=t0 + 10)
+        root = _save_webui_session("lineage_api_root", title="Visible root", updated_at=t0)
+        tip = _save_webui_session("lineage_api_tip", title="Visible tip", updated_at=t0 + 10)
         _save_webui_session("lineage_api_subtask", title="Subtask", updated_at=t0 + 20)
+        models.SESSION_INDEX_FILE.write_text(
+            json.dumps([root.compact(), tip.compact()]),
+            encoding="utf-8",
+        )
         _insert_state_row(
             conn,
             "lineage_api_root",

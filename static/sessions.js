@@ -25,6 +25,7 @@ let _loadingSessionId = null;
 // _statusCard) survive the wholesale replace. null when there is nothing
 // to carry forward (initial load, switch-to-different-session, etc.).
 let _pendingCarryForwardSnapshot = null;
+let _sameSessionForceReloadHint = null;
 
 // ── Composer draft persistence ────────────────────────────────────────────────
 
@@ -628,6 +629,8 @@ async function loadSession(sid){
     // no-op. The visible symptom is the token-usage badge vanishing ~10s
     // after each assistant turn completes. Stash the snapshot so the
     // carry-forward call can consume it.
+    if (currentSid === sid && forceReload) _captureSameSessionForceReloadHint(sid);
+    else _sameSessionForceReloadHint = null;
     _pendingCarryForwardSnapshot = (currentSid === sid && forceReload)
       ? (S.messages || []).slice()
       : null;
@@ -689,7 +692,7 @@ async function loadSession(sid){
   // Reset scroll-direction tracker on session switch so the new chat's
   // first scroll doesn't compare against the previous chat's scrollTop
   // and false-trigger an unpin (#1731 follow-up — Opus stage-302 SHOULD-FIX).
-  if (typeof window !== 'undefined' && typeof window._resetScrollDirectionTracker === 'function') {
+  if (currentSid !== sid && typeof window !== 'undefined' && typeof window._resetScrollDirectionTracker === 'function') {
     try { window._resetScrollDirectionTracker(); } catch (_) {}
   }
   if(typeof _applyPendingSessionModelForSession==='function') _applyPendingSessionModelForSession(sid);
@@ -857,13 +860,14 @@ async function loadSession(sid){
       setStatus('');
       setComposerStatus('');
       updateQueueBadge(sid);
-      syncTopbar();renderMessages();
+      if(currentSid===sid&&forceReload){syncTopbar();renderMessages({preserveScroll:true});}
+      else{syncTopbar();renderMessages();}
       if(typeof resumeManualCompressionForSession==='function') resumeManualCompressionForSession(sid);
       const _dirP=loadDir('.');
+      if(_dirP&&typeof _dirP.catch==='function') _dirP.catch(()=>{});
       // Workspace refresh is guarded by session id inside loadDir(); do not
       // block session-load completion, draft restore, or model resolution on
       // file-tree IO for users focused on the chat.
-      if(_dirP&&typeof _dirP.catch==='function') _dirP.catch(()=>{});
     }
   }
 
@@ -1338,6 +1342,50 @@ let _messagesTruncated = false;
 // Older messages are loaded on-demand via _loadOlderMessages().
 const _INITIAL_MSG_LIMIT = 30;
 
+function _sameSessionLoadedRenderableCount(){
+  if(typeof _messageRenderableMessageCount==='function'){
+    try{return Math.max(0,Number(_messageRenderableMessageCount())||0);}
+    catch(_){}
+  }
+  return (Array.isArray(S.messages)?S.messages:[]).filter(m=>m&&m.role&&m.role!=='tool').length;
+}
+
+function _captureSameSessionForceReloadHint(sid){
+  const messages=Array.isArray(S.messages)?S.messages:[];
+  if(!sid||!S.session||S.session.session_id!==sid||!messages.length){
+    _sameSessionForceReloadHint=null;
+    return;
+  }
+  const knownMessageCount=Number(S.session.message_count||messages.length||0);
+  _sameSessionForceReloadHint={
+    sid,
+    loadedMessageCount:messages.length,
+    loadedRenderableCount:_sameSessionLoadedRenderableCount(),
+    knownMessageCount:Math.max(knownMessageCount,messages.length),
+    wasTruncated:!!_messagesTruncated,
+  };
+}
+
+function _messageReloadLimitForSession(sid){
+  const hint=_sameSessionForceReloadHint;
+  if(!hint||hint.sid!==sid) return _INITIAL_MSG_LIMIT;
+  if(!hint.wasTruncated) return null;
+  const currentKnown=Number((S.session&&S.session.session_id===sid&&S.session.message_count)||0);
+  const appended=Math.max(0,currentKnown-(Number(hint.knownMessageCount)||0));
+  const loadedWidth=Math.max(
+    _INITIAL_MSG_LIMIT,
+    Number(hint.loadedMessageCount)||0,
+    Number(hint.loadedRenderableCount)||0
+  );
+  return loadedWidth+appended;
+}
+
+function _clearSameSessionForceReloadHint(sid){
+  if(!sid||(_sameSessionForceReloadHint&&_sameSessionForceReloadHint.sid===sid)){
+    _sameSessionForceReloadHint=null;
+  }
+}
+
 function _syncToolCallsForLoadedMessages(messages, sessionToolCalls){
   const msgs=Array.isArray(messages)?messages:[];
   const hasMessageToolMetadata=msgs.some(m=>{
@@ -1359,16 +1407,19 @@ async function _ensureMessagesLoaded(sid) {
     return;
   }
   // Fetch session messages with a tail window for fast initial load.
-  const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0&msg_limit=${_INITIAL_MSG_LIMIT}`);
+  const reloadLimit=_messageReloadLimitForSession(sid);
+  const reloadLimitParam=reloadLimit===null?'':`&msg_limit=${encodeURIComponent(reloadLimit||_INITIAL_MSG_LIMIT)}`;
+  let data;
+  try{
+    data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0${reloadLimitParam}`);
+  }finally{
+    _clearSameSessionForceReloadHint(sid);
+  }
   // Guard: api() may have redirected (401) and returned undefined.
   if (!data || !data.session) return;
   _messagesTruncated = !!data.session._messages_truncated;
   _oldestIdx = data.session._messages_offset || 0;
-  // #3162: `msgs` is reassigned below by the #3018 ephemeral-field carry-forward,
-  // so it must be `let`, not `const`. The `const` form threw a TypeError inside
-  // _ensureMessagesLoaded() that surfaced as a "Failed to load conversation messages"
-  // toast on every mobile message (SSE/visibility events trigger this reload path
-  // more aggressively on mobile).
+  // #3162: `msgs` is reassigned by ephemeral-field carry-forward, so it must be `let`.
   let msgs = (data.session.messages || []).filter(m => m && m.role);
   _syncToolCallsForLoadedMessages(msgs, data.session.tool_calls);
   clearLiveToolCards();
