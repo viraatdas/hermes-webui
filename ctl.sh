@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HERMES_HOME="${HERMES_HOME:-${HOME}/.hermes}"
 PID_FILE="${HERMES_WEBUI_PID_FILE:-${HERMES_HOME}/webui.pid}"
 LOG_FILE="${HERMES_WEBUI_LOG_FILE:-${HERMES_HOME}/webui.log}"
@@ -167,7 +167,11 @@ _is_alive() {
 
 _proc_args() {
   local pid="$1"
-  ps -p "${pid}" -o args= 2>/dev/null || true
+  if command -v ps >/dev/null 2>&1; then
+    ps -p "${pid}" -o args= 2>/dev/null || true
+  elif [[ -r "/proc/${pid}/cmdline" ]]; then
+    tr '\0' ' ' < "/proc/${pid}/cmdline" || true
+  fi
 }
 
 _is_owned_webui_pid() {
@@ -176,7 +180,7 @@ _is_owned_webui_pid() {
   _load_state_if_present
   state_repo="${REPO_ROOT:-}"
   state_python="${PYTHON_EXE:-}"
-  [[ "${state_repo}" == "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" ]] || return 1
+  [[ "${state_repo}" == "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)" ]] || return 1
   args="$(_proc_args "${pid}")"
   [[ -n "${args}" ]] || return 1
   [[ "${args}" == *"${state_repo}/bootstrap.py"* || "${args}" == *"${state_repo}/server.py"* || "${args}" == *"${state_repo}/start.sh"* || ( -n "${state_python}" && "${args}" == *"${state_python}"* ) ]]

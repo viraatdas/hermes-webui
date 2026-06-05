@@ -77,3 +77,56 @@ def test_same_session_force_reload_preserves_non_empty_composer_input():
     assert "const preserveActiveInput = !!(opts && opts.preserveActiveInput);" in SESSIONS_JS
     assert "if (preserveActiveInput && current && current !== text) return;" in SESSIONS_JS
     assert "_restoreComposerDraft(_draft, sid, {preserveActiveInput:currentSid===sid&&forceReload});" in SESSIONS_JS
+
+
+def test_same_session_force_reload_captures_loaded_width_before_clear():
+    """Reload-width hint must be captured before loadSession clears messages.
+
+    PR #3313's _pendingCarryForwardSnapshot must remain in the same block; it
+    preserves ephemeral fields, while this hint preserves the fetched transcript
+    width for the next _ensureMessagesLoaded() call.
+    """
+    body = SESSIONS_JS[SESSIONS_JS.index("async function loadSession(sid)") : SESSIONS_JS.index("// Phase 1: Load metadata only")]
+    hint_idx = body.index("_captureSameSessionForceReloadHint(sid)")
+    carry_idx = body.index("_pendingCarryForwardSnapshot =")
+    clear_idx = body.index("S.messages = [];")
+
+    assert "let _sameSessionForceReloadHint = null" in SESSIONS_JS
+    assert "function _captureSameSessionForceReloadHint(sid)" in SESSIONS_JS
+    assert hint_idx < clear_idx
+    assert carry_idx < clear_idx
+    assert "loadedRenderableCount:_sameSessionLoadedRenderableCount()" in SESSIONS_JS
+    assert "wasTruncated:!!_messagesTruncated" in SESSIONS_JS
+
+
+def test_same_session_force_reload_uses_dynamic_reload_limit_and_clears_hint():
+    body = SESSIONS_JS[SESSIONS_JS.index("async function _ensureMessagesLoaded") : SESSIONS_JS.index("function _messageComparableText")]
+
+    assert "function _messageReloadLimitForSession(sid)" in SESSIONS_JS
+    assert "const reloadLimit=_messageReloadLimitForSession(sid);" in body
+    assert "const reloadLimitParam=reloadLimit===null?'':`&msg_limit=${encodeURIComponent(reloadLimit||_INITIAL_MSG_LIMIT)}`;" in body
+    assert "messages=1&resolve_model=0${reloadLimitParam}" in body
+    assert "_clearSameSessionForceReloadHint(sid);" in body
+    assert "loadedWidth+appended" in SESSIONS_JS
+    assert "if(!hint.wasTruncated) return null;" in SESSIONS_JS
+
+
+def test_same_session_force_reload_preserves_scroll_without_changing_session_switch_default():
+    body = SESSIONS_JS[SESSIONS_JS.index("async function loadSession(sid)") : SESSIONS_JS.index("// Sync context usage indicator")]
+    idle_branch = body[body.index("}else{\n      S.busy=false;") :]
+
+    assert "if(currentSid===sid&&forceReload){syncTopbar();renderMessages({preserveScroll:true});}" in idle_branch
+    assert "else{syncTopbar();renderMessages();}" in idle_branch
+
+
+def test_same_session_force_reload_does_not_reset_scroll_pin_state():
+    """The preserve-scroll render relies on the user's existing pin state.
+
+    Same-session external refresh must not call the session-switch scroll reset;
+    otherwise an unpinned reader is marked pinned before renderMessages() can
+    restore the captured viewport.
+    """
+    body = SESSIONS_JS[SESSIONS_JS.index("async function loadSession(sid)") : SESSIONS_JS.index("// Sync context usage indicator")]
+
+    assert "currentSid !== sid && typeof window !== 'undefined' && typeof window._resetScrollDirectionTracker === 'function'" in body
+    assert "currentSid===sid&&forceReload" in body
